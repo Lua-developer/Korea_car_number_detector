@@ -1,6 +1,7 @@
 '''
-Mobile Parking Control System
-number.py
+github : https://github.com/Lua-developer
+Programmed by Jung Jin Young
+reference : https://github.com/Mactto/License_Plate_Recognition
 '''
 
 # 테서랙트를 이용한 number.py
@@ -29,7 +30,7 @@ MAX_PLATE_RATIO = 10
 
 MIN_AREA = 80
 MIN_WIDTH, MIN_HEIGHT = 2, 8
-MIN_RATIO, MAX_RATIO = 0.25, 1.0
+MIN_RATIO, MAX_RATIO = 0.5, 1.0
 
 possible_contours = []
 
@@ -89,10 +90,11 @@ def find_chars(contour_list):
 # 1단계 이미지 전처리
 def labeling_bulid_1(img_ori):
     height, width, channel = img_ori.shape
-    # 정확도 향상을 위한 Resize
-    height = 1024
-    width = 640
-    # img 이진화
+    '''
+    1차 이미지 전처리
+    이미지를 흑백조로 전환하고 모폴로지를 통해 차량 이미지에서 부풀리고 줄임으로 노이즈를 1차로 제거
+    가우시안 블러링을 통해 이미지의 윤곽선을 매끄럽게 수정함
+    '''
     gray = cv2.cvtColor(img_ori, cv2.COLOR_BGR2GRAY)
 
     structuringElement = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
@@ -102,11 +104,13 @@ def labeling_bulid_1(img_ori):
     
     imgGrayscalePlusTopHat = cv2.add(gray, imgTopHat)
     gray = cv2.subtract(imgGrayscalePlusTopHat, imgBlackHat)
-    # 가우시안 블러를 이용한 번호판 윤곽선 따기
     img_blurred = cv2.GaussianBlur(gray, ksize=(5, 5), sigmaX=0)
-
-    # 스레시홀드를 이용한 이미지의 임계점 관리
-    # 적응형 스레시홀드를 이용하여 유연하게 이미지 이진화를 수행합니다.
+    '''
+    Edge에 대해 블러링이 된 이미지에 스레시홀드를 가하여 회색조 이미지에서 흑백 반전을 일으킴
+    Adaptive Thresholding 기법중 Mean_Thresholding을 채택
+    Mean_Threshold는 번호판을 흐리게 하기 보다 이미지를 매끄럽게 처리하여 OCR의 인식율이 좋아짐
+    Gaussian_Thresholding 은 반대로 이미지를 더 흐리게 만들어 OCR의 인식율이 낮아짐
+    '''
     img_thresh = cv2.adaptiveThreshold(
         img_blurred, 
         maxValue=255.0, 
@@ -115,20 +119,19 @@ def labeling_bulid_1(img_ori):
         blockSize=19, 
         C=9
         )
-    # 스레시 홀드 상태에서 확인
-    # 컨투어로 윤곽선 따기
     contours, _ = cv2.findContours(
         img_thresh, 
         mode=cv2.RETR_LIST, 
         method=cv2.CHAIN_APPROX_SIMPLE
         )
 
+    '''
+    이미지의 특성을 이해하고 특성에 대해 수식으로 변환하기 위해 새로운 numpy array를 생성하고 제로패딩함
+    컨투어로 스레시홀딩된 이미지에서 연결성이 있는 객체에 대해 바운딩 박스를 그려 표현함
+    '''
     temp_result = np.zeros((height, width, channel), dtype=np.uint8)
-    # 컨투어의 사각형 범위 찾기
     cv2.drawContours(temp_result, contours=contours, contourIdx=-1, color=(255, 255, 255))
-    # temp_result가 이미지 객체
     temp_result = np.zeros((height, width, channel), dtype=np.uint8)
-
     contours_dict = []
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
@@ -167,48 +170,48 @@ def labeling_bulid_1(img_ori):
     for idx_list in result_idx:
         matched_result.append(np.take(possible_contours, idx_list))
 
-# visualize possible contours
+    '''
+    이미지에서 바운딩박스가 연속되는 지점에 대해 네모 박스 형태로 묶음처리를 한다.
+    바운딩박스가 규칙적으로 일정하게 반복되는 구간은 차량에서 번호판에 해당이 되므로 번호판을 네모처럼 잘라내는것과 같음
+    '''
     temp_result = np.zeros((height, width, channel), dtype=np.uint8)
     for r in matched_result:
         for d in r:
 #         cv2.drawContours(temp_result, d['contour'], -1, (255, 255, 255))
             cv2.rectangle(temp_result, pt1=(d['x'], d['y']), pt2=(d['x']+d['w'], d['y']+d['h']), color=(255, 255, 255), thickness=2)
-
     plate_imgs = []
     plate_infos = []
-
     for i, matched_chars in enumerate(matched_result):
         sorted_chars = sorted(matched_chars, key=lambda x: x['cx'])
-
         plate_cx = (sorted_chars[0]['cx'] + sorted_chars[-1]['cx']) / 2
         plate_cy = (sorted_chars[0]['cy'] + sorted_chars[-1]['cy']) / 2
     
         plate_width = (sorted_chars[-1]['x'] + sorted_chars[-1]['w'] - sorted_chars[0]['x']) * PLATE_WIDTH_PADDING
-    
         sum_height = 0
         for d in sorted_chars:
             sum_height += d['h']
 
         plate_height = int(sum_height / len(sorted_chars) * PLATE_HEIGHT_PADDING)
-    
         triangle_height = sorted_chars[-1]['cy'] - sorted_chars[0]['cy']
         triangle_hypotenus = np.linalg.norm(
         np.array([sorted_chars[0]['cx'], sorted_chars[0]['cy']]) - 
         np.array([sorted_chars[-1]['cx'], sorted_chars[-1]['cy']])
     )
-    
+        '''
+        해당 라인에서 연속적으로 이미지 프로세싱을 시도 할 시 오류가 있었음
+        angle은 번호판이 각지거나 휘었을때 픽셀 특징을 가지고 보정을 하는 기능임
+        첫번째에서는 반환되는 list의 개수가 1개 이나, 2번째 부터는 2개 이상을 반환
+        보정을 위해 컨볼루션을 거치는 것으로 보임, 마지막 리스트 내의 numpy array가 보정된 번호판 위치 특성인데 이전에 연산된 특징들 까지 중복으로 적용되었음
+        프로세스된 특징을 추출하고 리스트화 하여 번호판의 위치 특성을 labeling_bulid_1 함수에서 반환함
+        '''
         angle = np.degrees(np.arcsin(triangle_height / triangle_hypotenus))
-    
         rotation_matrix = cv2.getRotationMatrix2D(center=(plate_cx, plate_cy), angle=angle, scale=1.0)
-    
-        img_rotated = cv2.warpAffine(img_thresh, M=rotation_matrix, dsize=(width, height))
-    
+        img_rotated = cv2.warpAffine(img_thresh, M=rotation_matrix, dsize=(width, height))   
         img_cropped = cv2.getRectSubPix(
         img_rotated, 
         patchSize=(int(plate_width), int(plate_height)), 
         center=(int(plate_cx), int(plate_cy))
-    )
-    
+    ) 
         if img_cropped.shape[1] / img_cropped.shape[0] < MIN_PLATE_RATIO or img_cropped.shape[1] / img_cropped.shape[0] < MIN_PLATE_RATIO > MAX_PLATE_RATIO:
             continue
     
@@ -219,31 +222,48 @@ def labeling_bulid_1(img_ori):
         'w': int(plate_width),
         'h': int(plate_height)
     })
-    np.squeeze(plate_imgs)
-    return plate_imgs
+    # plate_imgs는 번호판 위치를 보정 후 번호판의 왜곡되지 않은 특성을 numpy.array 형태로 가지게 됨
+    # 만약 보정이 따로 들어가지 않았다면 해당 조건을 실행
+    if len(plate_imgs) == 1 :
+        np.squeeze(plate_imgs)
+        return plate_imgs
+    # 보정이 들어갔다면 해당 조건을 실행
+    # 계산된 특성을 추출하고 리스트로 매핑하여 반환
+    else :
+        np.squeeze(plate_imgs)
+        #print(type(plate_imgs))
+        #plate_imgs = np.array(new_plate, dtype=np.uint8)
+        new_plate = plate_imgs.pop()
+        new_plate = [new_plate]
+        return new_plate
 # 여기까지 labeling_bulid_1, plate_img 라는 전처리가 완료된 이미지 객체를 labeling_bulid_2 함수로 전달
     
 def labeling_bulid_2(MIN_AREA, MIN_WIDTH, MIN_HEIGHT, MIN_RATIO, MAX_RATIO, plate_imgs):
-    #최종확인
+    '''
+    labeling_bulid_2 함수는 번호판의 특징을 수식화한 plate_imgs를 받는다
+    이 이미지 특성을 담고 있는 객체는 2차적으로 전처리를 하고 각 바운딩박스에서 추출된 2차원 특징 벡터를 테서랙트 OCR과 대조한다.
+    동작 방식은 MNIST의 문자 판독과 비슷한 대조 방식
+    OCR에서 라벨링되어 반환된 string 문자열은 main.py 에서 최종적으로 예외처리를 거친 후 성공/실패 여부를 판단한다.
+    '''
     longest_idx, longest_text = -1, 0
     plate_chars = []
-
     for i, plate_img in enumerate(plate_imgs):
         plate_img = cv2.resize(plate_img, dsize=(0, 0), fx=1.6, fy=1.6)
         _, plate_img = cv2.threshold(plate_img, thresh=0.0, maxval=255.0, type=cv2.THRESH_BINARY | cv2.THRESH_OTSU)
     
-    # find contours again (same as above)
+    # 
         contours, _ = cv2.findContours(plate_img, mode=cv2.RETR_LIST, method=cv2.CHAIN_APPROX_SIMPLE)
     
         plate_min_x, plate_min_y = plate_img.shape[1], plate_img.shape[0]
         plate_max_x, plate_max_y = 0, 0
 
+    # 최종적으로 번호판 좌표 찍는 부분 문제X
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
         
             area = w * h
             ratio = w / h
-
+            
             if area > MIN_AREA \
         and w > MIN_WIDTH and h > MIN_HEIGHT \
         and MIN_RATIO < ratio < MAX_RATIO:
@@ -255,9 +275,14 @@ def labeling_bulid_2(MIN_AREA, MIN_WIDTH, MIN_HEIGHT, MIN_RATIO, MAX_RATIO, plat
                     plate_max_x = x + w
                 if y + h > plate_max_y:
                     plate_max_y = y + h
-        # 미세 조정, 차량 앞 번호의 나사는 모조리 걸러냄
+        '''
+        미세 조정, 차량 앞 번호의 나사는 모조리 걸러냄
+        카메라를 이용하여 직접 차량을 촬영 시 최적의 표준편차는 0.2
+        차량을 촬영하는게 아닌 기존의 사진을 이용하여 입력 시 최적의 표준편차는 0.4~0.5 사이
+        커널은 3,3 이 적당함, 표준편차를 조정하며 번호판에서 라벨링된 글자를 blurring 하여 sharp하게 만듬
+        해당 소스에서 잡아내지 못한 번호판 잡음은 main 단에서 다시 한번 예외처리
+        '''
         img_result = plate_img[plate_min_y:plate_max_y, plate_min_x+10:plate_max_x - 5]
-        # 표준편차 줘서 전체 스무딩 강도를 약화 시켜 라벨링 되는 번호를 샤프하게 만든다
         img_result = cv2.GaussianBlur(img_result, ksize=(3, 3), sigmaX=0.5)
         _, img_result = cv2.threshold(img_result, thresh=0.0, maxval=255.0, type=cv2.THRESH_BINARY | cv2.THRESH_OTSU)
         img_result = cv2.copyMakeBorder(img_result, top=10, bottom=10, left=10, right=10, borderType=cv2.BORDER_CONSTANT, value=(0,0,0))
