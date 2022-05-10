@@ -18,6 +18,10 @@ Improved recognition from existing references and added vehicle number correctio
 
 거의 라인바이 라인으로 주석을 쳐놨으나 주석과 기능이 일치 하지 않을 수 있습니다. 이 점은 지속적으로 개선 하겠습니다.
 
+1차 수정
+
+연속으로 2장 이상 프로세싱 시도 시 2회 이후 부터는 번호판이 부풀려 지는 현상 
+
 # Program excute image
 
 ![캡처](https://user-images.githubusercontent.com/83262616/167460854-fd9677be-3b76-4197-91db-443080e5a725.PNG)
