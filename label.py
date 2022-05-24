@@ -8,6 +8,7 @@ reference : https://github.com/Mactto/License_Plate_Recognition
 # 모듈화 진행 완료
 from unittest import result
 import cv2
+import Classification as cf
 import numpy as np
 import matplotlib.image as img 
 import matplotlib.pyplot as plt
@@ -31,8 +32,6 @@ MAX_PLATE_RATIO = 10
 MIN_AREA = 80
 MIN_WIDTH, MIN_HEIGHT = 2, 8
 MIN_RATIO, MAX_RATIO = 0.5, 1.0
-
-possible_contours = []
 
 def find_chars(contour_list):
     matched_result_idx = []
@@ -75,7 +74,7 @@ def find_chars(contour_list):
             if d4['idx'] not in matched_contours_idx:
                 unmatched_contour_idx.append(d4['idx'])
 
-        unmatched_contour = np.take(possible_contours, unmatched_contour_idx)
+        unmatched_contour = np.take(contour_list, unmatched_contour_idx)
         
         # recursive
         recursive_contour_list = find_chars(unmatched_contour)
@@ -90,6 +89,7 @@ def find_chars(contour_list):
 # 1단계 이미지 전처리
 def labeling_bulid_1(img_ori):
     height, width, channel = img_ori.shape
+    possible_contours = []
     '''
     1차 이미지 전처리
     이미지를 흑백조로 전환하고 모폴로지를 통해 차량 이미지에서 부풀리고 줄임으로 노이즈를 1차로 제거
@@ -224,6 +224,9 @@ def labeling_bulid_1(img_ori):
     })
     # plate_imgs는 번호판 위치를 보정 후 번호판의 왜곡되지 않은 특성을 numpy.array 형태로 가지게 됨
     # 만약 보정이 따로 들어가지 않았다면 해당 조건을 실행
+    if plate_imgs == None :
+        print("Error")
+        return None, None
     if len(plate_imgs) == 1 :
         np.squeeze(plate_imgs)
         return plate_imgs
@@ -283,7 +286,10 @@ def labeling_bulid_2(MIN_AREA, MIN_WIDTH, MIN_HEIGHT, MIN_RATIO, MAX_RATIO, plat
         해당 소스에서 잡아내지 못한 번호판 잡음은 main 단에서 다시 한번 예외처리
         '''
         img_result = plate_img[plate_min_y:plate_max_y, plate_min_x+10:plate_max_x - 5]
-        img_result = cv2.GaussianBlur(img_result, ksize=(3, 3), sigmaX=0.5)
+        try :
+            img_result = cv2.GaussianBlur(img_result, ksize=(3, 3), sigmaX=0.5)
+        except IndexError :
+            return None
         _, img_result = cv2.threshold(img_result, thresh=0.0, maxval=255.0, type=cv2.THRESH_BINARY | cv2.THRESH_OTSU)
         img_result = cv2.copyMakeBorder(img_result, top=10, bottom=10, left=10, right=10, borderType=cv2.BORDER_CONSTANT, value=(0,0,0))
         # 번호판 디버깅시 사용
@@ -303,6 +309,8 @@ def labeling_bulid_2(MIN_AREA, MIN_WIDTH, MIN_HEIGHT, MIN_RATIO, MAX_RATIO, plat
         # 가장 마지막에 있는 string 이 숫자인지 아스키 코드로 판별
         if has_digit and len(plate_chars) > longest_text:
             longest_idx = i
+        if isDiscount != 1 :
+            isDiscount = cf.isCompactCar(ori_img)
         if len(result_chars) >= 7 or len(result_chars) <= 9 :
             return result_chars
         else :
